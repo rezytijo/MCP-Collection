@@ -1,0 +1,57 @@
+name: Build and Push Kali Linux MCP Server
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Kali-Linux/**'
+  workflow_dispatch:
+    inputs:
+      tag_version:
+        description: 'Custom version tag (optional, default: date)'
+        required: false
+        type: string
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Get version tag
+        id: version
+        run: |
+          if [ -n "${{ inputs.tag_version }}" ]; then
+            echo "VERSION=${{ inputs.tag_version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=$(date +'%d-%m-%Y')" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push Kali Linux MCP image
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm/v7,linux/arm64,linux/ppc64le,linux/s390x \
+            --tag rezytijo/kali-mcp-server:${{ steps.version.outputs.VERSION }} \
+            --tag rezytijo/kali-mcp-server:latest \
+            --file ./Kali-Linux/Dockerfile \
+            --push \
+            ./Kali-Linux
+
+      - name: Summary
+        run: |
+          echo "### ✅ Kali Linux MCP Server Built Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Tags:**" >> $GITHUB_STEP_SUMMARY
+          echo "- \`rezytijo/kali-mcp-server:${{ steps.version.outputs.VERSION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`rezytijo/kali-mcp-server:latest\`" >> $GITHUB_STEP_SUMMARY

@@ -11,6 +11,8 @@ services:
       - PROXMOX_VERIFY_SSL=${PROXMOX_VERIFY_SSL:-false}
       - MCP_TRANSPORT=sse
       - MCP_PORT=8000
+    secrets:
+      - proxmox_password
     # Internal network only - not exposed directly to host
     networks:
       - mcp-network
@@ -41,3 +43,7 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
+
+secrets:
+  proxmox_password:
+    file: ./proxmox_password.txt

@@ -1,4 +1,10 @@
 # .dockerignore
+
+# Secrets
+.env
+proxmox_password.txt
+
+# Git and dev environment
 .git
 .gitignore
 __pycache__
@@ -10,16 +16,24 @@ __pycache__
 .vscode
 venv
 .venv
+
+# Build artifacts
 *.egg-info
 *.dist-info
 build
 dist
+
+# Temp files
 *.swp
 *~
 *.log
+
+# Gemini context & MCP config
 .gemini
 GEMINI.md
 Context.md
 readme.txt
 proxmox-mcp.yaml
 registry.yaml
+docker-compose.yaml
+Caddyfile

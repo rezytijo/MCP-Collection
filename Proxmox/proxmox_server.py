@@ -11,7 +11,12 @@ import string
 import base64
 import time
 import functools
+import io
+import paramiko
+import asyncio
+import shlex
 from proxmoxer import ProxmoxAPI
+from proxmoxer.core import ProxmoxResourceError
 from mcp.server.fastmcp import FastMCP
 
 # === LOGGING CONFIGURATION ===
@@ -25,30 +30,23 @@ class JSONFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
-        # Add extra structured data if present
         if hasattr(record, "structured"):
             log_obj.update(record.structured)
-            
         if record.exc_info:
             log_obj["exception"] = self.formatException(record.exc_info)
-            
         return json.dumps(log_obj)
 
-# Get Log Level from Env
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 handler = logging.StreamHandler(sys.stderr)
 
 if LOG_LEVEL == "DEBUG":
     handler.setFormatter(JSONFormatter())
 else:
-    # Simple 1-row format for INFO/WARN/ERROR
     handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
 
 root_logger = logging.getLogger()
 root_logger.addHandler(handler)
 root_logger.setLevel(LOG_LEVEL)
-
-# Create specific logger
 logger = logging.getLogger("proxmox-mcp")
 logger.setLevel(LOG_LEVEL)
 
@@ -61,63 +59,33 @@ def log_activity(func):
         tool_name = func.__name__
         start_time = time.time()
         
-        # Redact sensitive arguments
-        safe_kwargs = {}
-        for k, v in kwargs.items():
-            if k.lower() in ['password', 'secret', 'token']:
-                safe_kwargs[k] = "***REDACTED***"
-            else:
-                safe_kwargs[k] = v
+        safe_kwargs = {k: ("***REDACTED***" if k.lower() in ['password', 'secret', 'token', 'ssh_password', 'ssh_private_key'] else v) for k, v in kwargs.items()}
 
         logger.info(f"Tool Start: {tool_name}")
-        logger.debug(f"Arguments: {safe_kwargs}", extra={"structured": {
-            "event": "tool_start",
-            "tool": tool_name,
-            "arguments": safe_kwargs
-        }})
+        logger.debug(f"Arguments: {safe_kwargs}", extra={"structured": {"event": "tool_start", "tool": tool_name, "arguments": safe_kwargs}})
 
         try:
             result = await func(*args, **kwargs)
             duration = round(time.time() - start_time, 4)
-            
+            status = "success"
             if isinstance(result, str):
-                if result.startswith("❌"):
-                    status = "error"
-                elif result.startswith("⚠️"):
-                    status = "warning"
-                else:
-                    status = "success"
-            else:
-                status = "success"
-
+                if result.startswith("❌"): status = "error"
+                elif result.startswith("⚠️"): status = "warning"
+            
             logger.info(f"Tool Finish: {tool_name} ({status}, {duration}s)")
-            logger.debug(f"Result details for {tool_name}", extra={"structured": {
-                "event": "tool_finish",
-                "tool": tool_name,
-                "duration_sec": duration,
-                "status": status
-            }})
+            logger.debug(f"Result details for {tool_name}", extra={"structured": {"event": "tool_finish", "tool": tool_name, "duration_sec": duration, "status": status}})
             return result
 
         except Exception as e:
             duration = round(time.time() - start_time, 4)
-            logger.error(f"Tool Crash: {tool_name} - {str(e)}")
-            logger.debug("Crash details", exc_info=True, extra={"structured": {
-                "event": "tool_crash",
-                "tool": tool_name,
-                "duration_sec": duration,
-                "error": str(e)
-            }})
+            logger.error(f"Tool Crash: {tool_name} - {str(e)}", exc_info=True)
             return f"❌ Internal Server Error in {tool_name}: {str(e)}"
             
     return wrapper
 
 # === INITIALIZATION ===
 
-# Initialize MCP server - NO PROMPT PARAMETER!
 mcp = FastMCP("proxmox")
-
-# Configuration
 PROXMOX_URL = os.environ.get("PROXMOX_URL", "")
 PROXMOX_USER = os.environ.get("PROXMOX_USER", "")
 PROXMOX_PASSWORD = os.environ.get("PROXMOX_PASSWORD", "")
@@ -127,30 +95,12 @@ MCP_PORT = int(os.environ.get("MCP_PORT", "8000"))
 
 # === UTILITY FUNCTIONS ===
 
-def get_proxmox_client():
-    """Helper to authenticate and return the ProxmoxAPI client."""
-    if not PROXMOX_URL or not PROXMOX_USER or not PROXMOX_PASSWORD:
-        logger.error("Missing credentials")
-        raise ValueError("Missing Proxmox credentials. Set PROXMOX_URL, PROXMOX_USER, and PROXMOX_PASSWORD.")
-    
-    host = PROXMOX_URL.replace("https://", "").replace("http://", "").split("/")[0]
-    
-    return ProxmoxAPI(
-        host,
-        user=PROXMOX_USER,
-        password=PROXMOX_PASSWORD,
-        verify_ssl=PROXMOX_VERIFY_SSL
-    )
-
 def generate_secure_password(length=12):
     """Generate a secure random password with mixed case, numbers, and punctuation."""
     alphabet = string.ascii_letters + string.digits + string.punctuation
     while True:
         password = ''.join(secrets.choice(alphabet) for i in range(length))
-        if (any(c.islower() for c in password)
-                and any(c.isupper() for c in password)
-                and any(c.isdigit() for c in password)
-                and any(c in string.punctuation for c in password)):
+        if (any(c.islower() for c in password) and any(c.isupper() for c in password) and any(c.isdigit() for c in password) and any(c in string.punctuation for c in password)):
             return password
 
 def get_next_vmid(proxmox):
@@ -161,6 +111,102 @@ def get_next_vmid(proxmox):
     while candidate in existing_ids:
         candidate += 1
     return str(candidate)
+
+def get_proxmox_client():
+    """Helper to authenticate and return the ProxmoxAPI client."""
+    password = PROXMOX_PASSWORD
+    secret_path = "/run/secrets/proxmox_password"
+    if os.path.exists(secret_path):
+        with open(secret_path, 'r') as f:
+            password = f.read().strip()
+    if not all([PROXMOX_URL, PROXMOX_USER, password]):
+        raise ValueError("Missing Proxmox credentials. Set PROXMOX_URL, PROXMOX_USER, and PROXMOX_PASSWORD.")
+    host = PROXMOX_URL.replace("https://", "").replace("http://", "").split("/")[0]
+    # Added timeout=(30, 60) for connect and read timeouts
+    return ProxmoxAPI(host, user=PROXMOX_USER, password=password, verify_ssl=PROXMOX_VERIFY_SSL, timeout=(30, 60))
+
+def _connect_ssh():
+    """Returns an unconnected paramiko.SSHClient instance."""
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    return client
+
+def _get_pkey(ssh_private_key):
+    """Parses a private key string into a paramiko PKey object."""
+    if not ssh_private_key:
+        return None
+    key_types = [paramiko.Ed25519Key, paramiko.RSAKey, paramiko.ECDSAKey, paramiko.DSSKey]
+    for key_type in key_types:
+        try:
+            return key_type.from_private_key(io.StringIO(ssh_private_key))
+        except paramiko.SSHException:
+            continue
+    raise ValueError("Invalid or unsupported private key format.")
+
+def _execute_ssh_command(ip_address, ssh_user, ssh_password, ssh_private_key, ssh_port, command, cmd_timeout=60): # Added cmd_timeout parameter
+    """Helper function to execute a command over SSH."""
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    
+    try:
+        pkey = None
+        if ssh_private_key:
+            pkey = _get_pkey(ssh_private_key)
+
+        logger.debug(f"Connecting to {ssh_user}@{ip_address}:{ssh_port} via SSH")
+        client.connect(
+            hostname=ip_address,
+            port=ssh_port,
+            username=ssh_user,
+            password=ssh_password,
+            pkey=pkey,
+            timeout=15 # SSH connection timeout
+        )
+        
+        logger.debug(f"Executing SSH command: {command}")
+        # Use cmd_timeout for command execution
+        stdin, stdout, stderr = client.exec_command(command, timeout=cmd_timeout) 
+        exit_code = stdout.channel.recv_exit_status()
+        out_data = stdout.read().decode('utf-8', errors='replace')
+        err_data = stderr.read().decode('utf-8', errors='replace')
+        
+        return exit_code, out_data, err_data
+            
+    except Exception as e:
+        logger.error(f"SSH helper function failed: {e}", exc_info=True)
+        return -1, "", str(e)
+    finally:
+        client.close()
+
+def _read_sftp_file(client, file_path):
+    """Reads a file via SFTP."""
+    sftp = None
+    try:
+        sftp = client.open_sftp()
+        with sftp.open(file_path, 'r') as f:
+            content = f.read().decode('utf-8', errors='replace')
+            return f"📄 **File: {file_path} (via SFTP)**\n```\n{content}\n```"
+    except FileNotFoundError:
+        return f"❌ SFTP read failed: File not found at '{file_path}'."
+    except Exception as e:
+        logger.error(f"SFTP read failed for {file_path}: {e}", exc_info=True)
+        return f"❌ SFTP read failed: {str(e)}"
+    finally:
+        if sftp: sftp.close()
+
+def _write_sftp_file(client, file_path, content):
+    """Writes a file via SFTP."""
+    sftp = None
+    try:
+        sftp = client.open_sftp()
+        with sftp.open(file_path, 'w') as f:
+            f.write(content)
+        return f"✅ File '{file_path}' written successfully via SFTP."
+    except Exception as e:
+        logger.error(f"SFTP write failed for {file_path}: {e}", exc_info=True)
+        return f"❌ SFTP write failed: {str(e)}"
+    finally:
+        if sftp: sftp.close()
 
 # === MCP TOOLS ===
 
@@ -400,7 +446,7 @@ async def proxmox_update_vm(node: str = "", vmid: str = "", cores: int = 0, memo
         config_updates = {}
         changes_report = []
         
-        if cores > 0:
+        if cores > 0: 
             config_updates['cores'] = cores
             changes_report.append(f"Cores: {curr_cores} -> {cores}")
         if memory > 0:
@@ -565,7 +611,7 @@ async def proxmox_list_content(node: str = "", storage: str = "") -> str:
 
     try:
         proxmox = get_proxmox_client()
-        content_items = proxmox.nodes(node).storage(storage).content.get()
+        content_items = proxmox.nodes(node).storage(storage).content.get(content="iso,vztmpl")
         
         isos = []
         templates = []
@@ -580,7 +626,7 @@ async def proxmox_list_content(node: str = "", storage: str = "") -> str:
             elif content_type == "vztmpl": # LXC Container Template
                 templates.append(name)
         
-        output = [f"📦 **Content on {storage} (Node: {node})**:\n"]
+        output = [f"📦 **Content on {storage} (Node: {node})**\n"]
         
         if isos:
             output.append("💿 **ISOs**:")
@@ -602,99 +648,247 @@ async def proxmox_list_content(node: str = "", storage: str = "") -> str:
 
 @mcp.tool()
 @log_activity
-async def proxmox_install_software(node: str = "", vmid: str = "", software: str = "") -> str:
+async def proxmox_install_software(
+    node: str = "", 
+    vmid: str = "", 
+    software: str = "",
+    ip_address: str = "",
+    ssh_user: str = "",
+    ssh_password: str = "",
+    ssh_private_key: str = "",
+    ssh_port: int = 22
+) -> str:
     """
-    Install software inside a VM using QEMU Guest Agent.
+    Install software inside a VM using QEMU Guest Agent or fallback to SSH.
+    For SSH, you must provide ip_address, ssh_user, and either ssh_password or ssh_private_key.
     """
-    if not node.strip() or not vmid.strip() or not software.strip():
+    if not all([node, vmid, software]):
         return "❌ Error: Node, VMID, and software name are required."
 
-    software = software.lower()
+    proxmox = get_proxmox_client()
+    
+    # 1. Try QEMU Guest Agent first
     try:
-        proxmox = get_proxmox_client()
-        try:
-            proxmox.nodes(node).qemu(vmid).agent.get("info")
-        except:
-             return f"❌ Error: QEMU Guest Agent is not running on VM {vmid}. Ensure it is installed and the VM is running."
+        logger.info(f"Attempting to use QEMU Guest Agent for VM {vmid}.")
+        proxmox.nodes(node).qemu(vmid).agent.get("info")
+        
+        install_command = (
+            f"sh -c 'if command -v apt-get >/dev/null; then "
+            f"apt-get update && apt-get install -y {software}; "
+            f"elif command -v yum >/dev/null; then "
+            f"yum install -y {software}; "
+            f"elif command -v dnf >/dev/null; then "
+            f"dnf install -y {software}; "
+            f"else echo \"Unsupported package manager.\" >&2; exit 1; fi'"
+        )
 
-        commands = []
-        if software == "docker":
-            commands = ["/bin/bash", "-c", "curl -fsSL https://get.docker.com | sh"]
-        elif software == "nginx":
-            commands = ["/bin/bash", "-c", "apt-get update && apt-get install -y nginx"]
-        elif software == "update":
-            commands = ["/bin/bash", "-c", "apt-get update && apt-get upgrade -y"]
-        elif software == "wordpress_docker":
-             commands = ["/bin/bash", "-c", "docker run -d --name wordpress -p 80:80 -e WORDPRESS_DB_HOST=host.docker.internal -e WORDPRESS_DB_USER=root -e WORDPRESS_DB_PASSWORD=root wordpress"]
-        else:
-            return f"⚠️ Unknown software '{software}'. Supported: docker, nginx, update, wordpress_docker."
-
-        res = proxmox.nodes(node).qemu(vmid).agent.exec.post(command=commands)
+        cmd_list = ["/bin/bash", "-c", install_command]
+        res = proxmox.nodes(node).qemu(vmid).agent.exec.post(command=cmd_list)
         pid = res.get('pid')
         
         if not pid:
-            return "❌ Failed to start execution (No PID returned)."
+            raise ProxmoxResourceError("Failed to start execution (No PID returned).")
 
-        retries = 0
-        max_retries = 60 
-        while retries < max_retries:
+        for _ in range(60): # 2-minute timeout
             status = proxmox.nodes(node).qemu(vmid).agent('exec-status').get(pid=pid)
             if status.get('exited') == 1:
                 exitcode = status.get('exitcode')
                 out_data = status.get('out-data', '')
                 err_data = status.get('err-data', '')
                 if exitcode == 0:
-                    return f"✅ '{software}' installed successfully!\nOutput: {out_data}"
+                    return f"✅ '{software}' installed successfully via Guest Agent!\nOutput: {out_data}"
                 else:
-                    return f"❌ Installation failed (Exit Code {exitcode}).\nError: {err_data}\nOutput: {out_data}"
+                    return f"❌ Agent command failed (Exit Code {exitcode}).\nError: {err_data}\nOutput: {out_data}"
             time.sleep(2)
-            retries += 1
+        
+        return f"⏳ Agent command for '{software}' started (PID {pid}), but timed out. Check VM manually."
 
-        return f"⏳ Installation of '{software}' started (PID {pid}), but timed out waiting for response. Check VM manually."
+    except ProxmoxResourceError as e:
+        logger.warning(f"QEMU Guest Agent failed for VM {vmid}: {e}. Attempting SSH fallback.")
 
-    except Exception as e:
-        return f"❌ Error executing agent command: {str(e)}"
+        if not all([ip_address, ssh_user]) or not (ssh_password or ssh_private_key):
+            return (f"❌ QEMU Guest Agent not available on VM {vmid}.\n"
+                    f"⚠️ To use SSH fallback, provide: 'ip_address', 'ssh_user', and either 'ssh_password' or 'ssh_private_key'.")
+
+        logger.info(f"Using SSH fallback for VM {vmid} at {ip_address}.")
+        
+        install_command = (
+            f"if command -v apt-get >/dev/null; then "
+            f"sudo apt-get update && sudo apt-get install -y {software}; "
+            f"elif command -v yum >/dev/null; then "
+            f"sudo yum install -y {software}; "
+            f"elif command -v dnf >/dev/null; then "
+            f"sudo dnf install -y {software}; "
+            f"else echo \"Unsupported package manager.\" >&2; exit 1; fi"
+        )
+        
+        # Use a 5-minute timeout for installation commands via SSH
+        exit_code, out_data, err_data = await asyncio.get_event_loop().run_in_executor(
+            None, _execute_ssh_command, ip_address, ssh_user, ssh_password, ssh_private_key, ssh_port, install_command, 300
+        )
+
+        if exit_code == 0:
+            return f"✅ '{software}' installed successfully via SSH!\nOutput: {out_data}"
+        else:
+            return f"❌ SSH command failed (Exit Code {exit_code}).\nError: {err_data}\nOutput: {out_data}"
 
 @mcp.tool()
 @log_activity
-async def proxmox_execute_command(node: str = "", vmid: str = "", command: str = "") -> str:
-    """Execute an arbitrary shell command inside a VM using QEMU Guest Agent."""
-    if not node.strip() or not vmid.strip() or not command.strip():
+async def proxmox_execute_command(
+    node: str = "", 
+    vmid: str = "", 
+    command: str = "",
+    ip_address: str = "",
+    ssh_user: str = "",
+    ssh_password: str = "",
+    ssh_private_key: str = "",
+    ssh_port: int = 22
+) -> str:
+    """Execute a shell command in a VM via QEMU Guest Agent or SSH fallback."""
+    if not all([node, vmid, command]):
         return "❌ Error: Node, VMID, and command are required."
 
+    proxmox = get_proxmox_client()
+    
     try:
-        proxmox = get_proxmox_client()
-        try:
-            proxmox.nodes(node).qemu(vmid).agent.get("info")
-        except:
-             return f"❌ Error: QEMU Guest Agent is not running on VM {vmid}."
+        logger.info(f"Attempting to use QEMU Guest Agent for command on VM {vmid}.")
+        proxmox.nodes(node).qemu(vmid).agent.get("info")
 
         cmd_list = ["/bin/bash", "-c", command]
         res = proxmox.nodes(node).qemu(vmid).agent.exec.post(command=cmd_list)
         pid = res.get('pid')
         
         if not pid:
-            return "❌ Failed to start execution (No PID returned)."
+            raise ProxmoxResourceError("Failed to start execution (No PID returned).")
 
-        retries = 0
-        max_retries = 30 
-        while retries < max_retries:
+        for _ in range(30): # 1-minute timeout (agent)
             status = proxmox.nodes(node).qemu(vmid).agent('exec-status').get(pid=pid)
             if status.get('exited') == 1:
                 exitcode = status.get('exitcode')
                 out_data = status.get('out-data', '')
                 err_data = status.get('err-data', '')
                 if exitcode == 0:
-                    return f"✅ Command executed successfully.\nOutput: {out_data}"
+                    return f"✅ Agent command executed successfully.\nOutput: {out_data}"
                 else:
-                    return f"❌ Command failed (Exit Code {exitcode}).\nError: {err_data}\nOutput: {out_data}"
-            time.sleep(1)
-            retries += 1
+                    return f"❌ Agent command failed (Exit Code {exitcode}).\nError: {err_data}\nOutput: {out_data}"
+            time.sleep(2)
 
-        return f"⏳ Command started (PID {pid}), but waiting timed out."
+        return f"⏳ Agent command started (PID {pid}), but timed out."
 
-    except Exception as e:
-        return f"❌ Error executing command: {str(e)}"
+    except ProxmoxResourceError as e:
+        logger.warning(f"QEMU Guest Agent failed for VM {vmid}: {e}. Attempting SSH fallback.")
+        
+        if not all([ip_address, ssh_user]) or not (ssh_password or ssh_private_key):
+            return (f"❌ QEMU Guest Agent not available on VM {vmid}.\n"
+                    f"⚠️ To use SSH fallback, provide: 'ip_address', 'ssh_user', and either 'ssh_password' or 'ssh_private_key'.")
+
+        logger.info(f"Using SSH fallback for command on VM {vmid} at {ip_address}.")
+        
+        # Use a 1-minute timeout for arbitrary commands via SSH
+        exit_code, out_data, err_data = await asyncio.get_event_loop().run_in_executor(
+            None, _execute_ssh_command, ip_address, ssh_user, ssh_password, ssh_private_key, ssh_port, command, 60
+        )
+        
+        if exit_code == 0:
+            return f"✅ Command executed successfully via SSH.\nOutput: {out_data}"
+        else:
+            return f"❌ SSH command failed (Exit Code {exit_code}).\nError: {err_data}\nOutput: {out_data}"
+
+@mcp.tool()
+@log_activity
+async def proxmox_read_file_vm(
+    node: str = "", 
+    vmid: str = "", 
+    file_path: str = "",
+    ip_address: str = "",
+    ssh_user: str = "",
+    ssh_password: str = "",
+    ssh_private_key: str = "",
+    ssh_port: int = 22
+) -> str:
+    """Read file content from a VM using QEMU Guest Agent or fallback to SSH."""
+    if not all([node, vmid, file_path]):
+        return "❌ Error: Node, VMID, and File Path are required."
+
+    proxmox = get_proxmox_client()
+    try:
+        logger.info(f"Attempting to read file via Guest Agent from VM {vmid}.")
+        res = proxmox.nodes(node).qemu(vmid).agent('file-read').get(file=file_path)
+        content_b64 = res.get('content', '')
+        content_bytes = base64.b64decode(content_b64)
+        content_str = content_bytes.decode('utf-8', errors='replace')
+        return f"📄 **File: {file_path} (via Agent)**\n```\n{content_str}\n```"
+
+    except ProxmoxResourceError as e:
+        logger.warning(f"QEMU Guest Agent failed for VM {vmid}: {e}. Attempting SSH fallback.")
+        
+        if not all([ip_address, ssh_user]) or not (ssh_password or ssh_private_key):
+            return (f"❌ QEMU Guest Agent not available on VM {vmid}.\n"
+                    f"⚠️ To use SSH fallback, provide: 'ip_address', 'ssh_user', and either 'ssh_password' or 'ssh_private_key'.")
+
+        logger.info(f"Using SSH fallback to read file on VM {vmid} at {ip_address}.")
+        
+        client = _connect_ssh()
+        try:
+            pkey = _get_pkey(ssh_private_key)
+            client.connect(hostname=ip_address, port=ssh_port, username=ssh_user, password=ssh_password, pkey=pkey, timeout=15)
+            # SFTP read operations do not have explicit per-operation timeouts beyond connection
+            result = await asyncio.get_event_loop().run_in_executor(None, _read_sftp_file, client, file_path)
+            return result
+        except Exception as ssh_e:
+            return f"❌ SSH/SFTP connection failed: {ssh_e}"
+        finally:
+            client.close()
+
+@mcp.tool()
+@log_activity
+async def proxmox_write_file_vm(
+    node: str = "", 
+    vmid: str = "", 
+    file_path: str = "", 
+    content: str = "",
+    ip_address: str = "",
+    ssh_user: str = "",
+    ssh_password: str = "",
+    ssh_private_key: str = "",
+    ssh_port: int = 22
+) -> str:
+    """Write content to a file in a VM using QEMU Guest Agent or fallback to SSH."""
+    if not all([node, vmid, file_path]):
+        return "❌ Error: Node, VMID, and File Path are required."
+
+    proxmox = get_proxmox_client()
+    try:
+        logger.info(f"Attempting to write file via Guest Agent to VM {vmid}.")
+        content_b64 = base64.b64encode(content.encode('utf-8')).decode('ascii')
+        
+        proxmox.nodes(node).qemu(vmid).agent('file-write').post(
+            file=file_path, 
+            content=content_b64,
+            encode=1
+        )
+        return f"✅ File '{file_path}' written successfully via Guest Agent."
+
+    except ProxmoxResourceError as e:
+        logger.warning(f"QEMU Guest Agent failed for VM {vmid}: {e}. Attempting SSH fallback.")
+        
+        if not all([ip_address, ssh_user]) or not (ssh_password or ssh_private_key):
+            return (f"❌ QEMU Guest Agent not available on VM {vmid}.\n"
+                    f"⚠️ To use SSH fallback, provide: 'ip_address', 'ssh_user', and either 'ssh_password' or 'ssh_private_key'.")
+
+        logger.info(f"Using SSH fallback to write file on VM {vmid} at {ip_address}.")
+        
+        client = _connect_ssh()
+        try:
+            pkey = _get_pkey(ssh_private_key)
+            client.connect(hostname=ip_address, port=ssh_port, username=ssh_user, password=ssh_password, pkey=pkey, timeout=15)
+            # SFTP write operations do not have explicit per-operation timeouts beyond connection
+            result = await asyncio.get_event_loop().run_in_executor(None, _write_sftp_file, client, file_path, content)
+            return result
+        except Exception as ssh_e:
+            return f"❌ SSH/SFTP connection failed: {ssh_e}"
+        finally:
+            client.close()
 
 @mcp.tool()
 @log_activity
@@ -822,44 +1016,6 @@ async def proxmox_create_lxc(
     except Exception as e:
         return f"❌ Error creating LXC: {str(e)}"
 
-@mcp.tool()
-@log_activity
-async def proxmox_read_file_vm(node: str = "", vmid: str = "", file_path: str = "") -> str:
-    """Read text content from a specific path inside the VM via QEMU Guest Agent."""
-    if not node.strip() or not vmid.strip() or not file_path.strip():
-        return "❌ Error: Node, VMID, and File Path are required."
-
-    try:
-        proxmox = get_proxmox_client()
-        res = proxmox.nodes(node).qemu(vmid).agent('file-read').get(file=file_path)
-        
-        content_b64 = res.get('content', '')
-        content_bytes = base64.b64decode(content_b64)
-        content_str = content_bytes.decode('utf-8', errors='replace')
-        
-        return f"📄 **File: {file_path}**\n```\n{content_str}\n```"
-    except Exception as e:
-        return f"❌ Error reading file: {str(e)}"
-
-@mcp.tool()
-@log_activity
-async def proxmox_write_file_vm(node: str = "", vmid: str = "", file_path: str = "", content: str = "") -> str:
-    """Write content to a path inside the VM via QEMU Guest Agent."""
-    if not node.strip() or not vmid.strip() or not file_path.strip():
-        return "❌ Error: Node, VMID, and File Path are required."
-
-    try:
-        proxmox = get_proxmox_client()
-        content_b64 = base64.b64encode(content.encode('utf-8')).decode('ascii')
-        
-        proxmox.nodes(node).qemu(vmid).agent('file-write').post(
-            file=file_path, 
-            content=content_b64,
-            encode=1
-        )
-        return f"✅ File '{file_path}' written successfully."
-    except Exception as e:
-        return f"❌ Error writing file: {str(e)}"
 
 @mcp.tool()
 @log_activity
@@ -930,7 +1086,7 @@ async def proxmox_get_vm_config(node: str = "", vmid: str = "") -> str:
         try:
             config = proxmox.nodes(node).qemu(vmid).config.get()
             vm_type = "VM"
-        except:
+        except Exception: # Catch generic exception as ProxmoxResourceError is not specific for qemu/lxc check
             try:
                 config = proxmox.nodes(node).lxc(vmid).config.get()
                 vm_type = "LXC"
@@ -975,6 +1131,7 @@ async def proxmox_get_task_status(node: str = "", upid: str = "") -> str:
     except Exception as e:
         return f"❌ Error getting task status: {str(e)}"
 
+
 if __name__ == "__main__":
     logger.info("Starting Proxmox MCP server...", extra={"structured": {"event": "startup"}})
     try:
@@ -982,8 +1139,8 @@ if __name__ == "__main__":
             logger.info(f"Starting MCP server with SSE transport on port {MCP_PORT}")
             mcp.run(transport='sse', port=MCP_PORT)
         else:
-            logger.info("Starting MCP server with STDIO transport (default)")
+            logger.info("Starting MCP server with STDIO transport")
             mcp.run(transport='stdio')
     except Exception as e:
-        logger.fatal(f"Server failed to start: {e}", exc_info=True, extra={"structured": {"event": "fatal_crash"}})
+        logger.fatal(f"Server failed to start: {e}", exc_info=True)
         sys.exit(1)
