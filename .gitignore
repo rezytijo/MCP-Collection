@@ -4,6 +4,7 @@
 .DS_Store
 .env
 .vscode/
+env.example
 
 # Python ignores
 __pycache__/

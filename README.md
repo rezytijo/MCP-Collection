@@ -62,6 +62,46 @@ _This section will be populated with the actual `docker-compose.yaml` content in
 
 To connect to the deployed MCP servers, you will need to configure your MCP client. Assuming you are using `localhost` with the provided `docker-compose.yaml` and `Caddyfile`:
 
+#### JSON Configuration Examples
+
+Here are examples of how you might configure your MCP client using JSON. These configurations define the connection details for each server.
+
+**Proxmox MCP Server Configuration:**
+
+```json
+{
+  "name": "Proxmox MCP Server",
+  "url": "http://localhost/proxmox",
+  "transport": "sse",
+  "port": 80,
+  "config": {
+    "node_name": "pve",
+    "ip_address": "172.30.3.80"
+  },
+  "tools": []
+}
+```
+
+**Kali-Linux MCP Server Configuration:**
+
+```json
+{
+  "name": "Kali-Linux MCP Server",
+  "url": "http://localhost/kali",
+  "transport": "sse",
+  "port": 80,
+  "tools": []
+}
+```
+
+**Explanation of Fields:**
+- `name`: A user-friendly name for the server.
+- `url`: The base URL to access the server via the Caddy reverse proxy.
+- `transport`: The communication protocol, typically `sse` (Server-Sent Events) for MCP servers.
+- `port`: The port exposed by the Caddy reverse proxy (e.g., 80 for HTTP, 443 for HTTPS).
+- `config`: (Optional) A dictionary for server-specific configurations, such as node names or IP addresses for Proxmox.
+- `tools`: An array where the client would typically list the tools available from this server after discovery.
+
 1.  **For Proxmox MCP Server**:
     *   **Server Name**: `proxmox-mcp` (or whatever you name it in your client)
     *   **URL**: `http://localhost/proxmox`
