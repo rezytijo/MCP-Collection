@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  proxmox-mcp:
+    build:
+      context: ./Proxmox
+      dockerfile: Dockerfile
+    container_name: proxmox-mcp
+    environment:
+      # MCP_TRANSPORT and MCP_PORT are typically set inside the container for local/stdio operation
+      # or managed by Caddy for SSE. For development, you might expose a port directly.
+      # For Caddy to work, the internal port needs to be known (default 8000).
+      - MCP_TRANSPORT=sse
+      - MCP_PORT=8000
+    # ports:
+    #   - "8000:8000" # Only uncomment for direct access, Caddy will handle routing
+    networks:
+      - mcp-network
+
+  kali-mcp:
+    build:
+      context: ./Kali-Linux
+      dockerfile: Dockerfile
+    container_name: kali-mcp
+    environment:
+      - MCP_TRANSPORT=sse
+      - MCP_PORT=8000
+    # ports:
+    #   - "8001:8000" # Only uncomment for direct access, Caddy will handle routing
+    networks:
+      - mcp-network
+    cap_add:
+      - NET_RAW # Required for some pentesting tools like Nmap
+      - NET_ADMIN # Required for some pentesting tools
+
+  caddy:
+    image: caddy:2.7.5-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443" # For HTTPS if you configure it in Caddyfile
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+    networks:
+      - mcp-network
+
+networks:
+  mcp-network:
+    driver: bridge
+
+volumes:
+  caddy_data:
