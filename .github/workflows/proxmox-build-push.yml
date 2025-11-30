@@ -39,14 +39,15 @@ jobs:
           fi
 
       - name: Build and push Proxmox MCP image
-        run: |
-          docker buildx build \
-            --platform linux/amd64,linux/arm/v7,linux/arm64,linux/ppc64le,linux/s390x \
-            --tag rezytijo/proxmox-mcp-server:${{ steps.version.outputs.VERSION }} \
-            --tag rezytijo/proxmox-mcp-server:latest \
-            --file ./Proxmox/Dockerfile \
-            --push \
-            ./Proxmox
+        uses: docker/build-push-action@v5
+        with:
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            rezytijo/proxmox-mcp-server:${{ steps.version.outputs.VERSION }}
+            rezytijo/proxmox-mcp-server:latest
+          file: ./Proxmox/Dockerfile
+          push: true
+          context: ./Proxmox
 
       - name: Summary
         run: |

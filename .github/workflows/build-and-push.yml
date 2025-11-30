@@ -36,14 +36,15 @@ jobs:
         run: echo "VERSION=$(date +'%d-%m-%Y')" >> $GITHUB_OUTPUT
 
       - name: Build and push Proxmox MCP image
-        run: |
-          docker buildx build \
-            --platform linux/amd64,linux/arm/v7,linux/arm64,linux/ppc64le,linux/s390x \
-            --tag rezytijo/proxmox-mcp-server:${{ steps.date.outputs.VERSION }} \
-            --tag rezytijo/proxmox-mcp-server:latest \
-            --file ./Proxmox/Dockerfile \
-            --push \
-            ./Proxmox
+        uses: docker/build-push-action@v5
+        with:
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            rezytijo/proxmox-mcp-server:${{ steps.date.outputs.VERSION }}
+            rezytijo/proxmox-mcp-server:latest
+          file: ./Proxmox/Dockerfile
+          push: true
+          context: ./Proxmox
 
   build-and-push-kali:
     runs-on: ubuntu-latest
@@ -71,11 +72,12 @@ jobs:
         run: echo "VERSION=$(date +'%d-%m-%Y')" >> $GITHUB_OUTPUT
 
       - name: Build and push Kali MCP image
-        run: |
-          docker buildx build \
-            --platform linux/amd64,linux/arm/v7,linux/arm64,linux/ppc64le,linux/s390x \
-            --tag rezytijo/kali-mcp-server:${{ steps.date.outputs.VERSION }} \
-            --tag rezytijo/kali-mcp-server:latest \
-            --file ./Kali-Linux/Dockerfile \
-            --push \
-            ./Kali-Linux
+        uses: docker/build-push-action@v5
+        with:
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            rezytijo/kali-mcp-server:${{ steps.date.outputs.VERSION }}
+            rezytijo/kali-mcp-server:latest
+          file: ./Kali-Linux/Dockerfile
+          push: true
+          context: ./Kali-Linux
