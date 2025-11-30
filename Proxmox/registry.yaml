@@ -1,0 +1,13 @@
+registry:
+  context7:
+    ref: ""
+  duckduckgo:
+    ref: ""
+  elasticsearch:
+    ref: ""
+  obsidian:
+    ref: ""
+  playwright:
+    ref: ""
+  proxmox:
+    ref: ""

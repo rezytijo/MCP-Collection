@@ -1,0 +1,25 @@
+# .dockerignore
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.ps1
+.pytest_cache
+.vscode
+venv
+.venv
+*.egg-info
+*.dist-info
+build
+dist
+*.swp
+*~
+*.log
+.gemini
+GEMINI.md
+Context.md
+readme.txt
+proxmox-mcp.yaml
+registry.yaml

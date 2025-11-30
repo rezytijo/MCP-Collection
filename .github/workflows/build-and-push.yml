@@ -1,0 +1,76 @@
+name: Build and Push MCP Server Docker Images
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Proxmox/**'
+      - 'Kali-Linux/**'
+
+jobs:
+  build-and-push-proxmox:
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.head_commit.modified, 'Proxmox/') ||
+      contains(github.event.head_commit.added, 'Proxmox/') ||
+      contains(github.event.head_commit.removed, 'Proxmox/')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Get current date for version tag
+        id: date
+        run: echo "VERSION=$(date +'%d-%m-%Y')" >> $GITHUB_OUTPUT
+
+      - name: Build and push Proxmox MCP image
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm/v7,linux/arm64,linux/ppc64le,linux/s390x \
+            --tag rezytijo/proxmox-mcp-server:${{ steps.date.outputs.VERSION }} \
+            --tag rezytijo/proxmox-mcp-server:latest \
+            --file ./Proxmox/Dockerfile \
+            --push \
+            ./Proxmox
+
+  build-and-push-kali:
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.head_commit.modified, 'Kali-Linux/') ||
+      contains(github.event.head_commit.added, 'Kali-Linux/') ||
+      contains(github.event.head_commit.removed, 'Kali-Linux/')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Get current date for version tag
+        id: date
+        run: echo "VERSION=$(date +'%d-%m-%Y')" >> $GITHUB_OUTPUT
+
+      - name: Build and push Kali MCP image
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm/v7,linux/arm64,linux/ppc64le,linux/s390x \
+            --tag rezytijo/kali-mcp-server:${{ steps.date.outputs.VERSION }} \
+            --tag rezytijo/kali-mcp-server:latest \
+            --file ./Kali-Linux/Dockerfile \
+            --push \
+            ./Kali-Linux

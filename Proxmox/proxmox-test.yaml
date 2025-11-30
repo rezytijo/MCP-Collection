@@ -1,0 +1,61 @@
+version: 2
+name: proxmox-test
+displayName: Proxmox MCP Test Server
+registry:
+  proxmox-test:
+    description: "Local test instance of Proxmox MCP Server"
+    title: "Proxmox VE Test"
+    type: server
+    dateAdded: "2025-11-30T00:00:00Z"
+    image: rezytijo/proxmox-mcp-server:local-test
+    ref: ""
+    readme: ""
+    toolsUrl: ""
+    source: ""
+    upstream: ""
+    icon: ""
+    tools:
+      - name: proxmox_list_nodes
+      - name: proxmox_list_vms
+      - name: proxmox_start_vm
+      - name: proxmox_stop_vm
+      - name: proxmox_create_vm_from_template
+      - name: proxmox_delete_vm
+      - name: proxmox_update_vm
+      - name: proxmox_create_snapshot
+      - name: proxmox_list_snapshots
+      - name: proxmox_rollback_snapshot
+      - name: proxmox_delete_snapshot
+      - name: proxmox_get_vm_stats
+      - name: proxmox_list_storage
+      - name: proxmox_list_content
+      - name: proxmox_install_software
+      - name: proxmox_execute_command
+      - name: proxmox_create_backup
+      - name: proxmox_list_backups
+      - name: proxmox_restore_backup
+      - name: proxmox_migrate_vm
+      - name: proxmox_create_lxc
+      - name: proxmox_read_file_vm
+      - name: proxmox_write_file_vm
+      - name: proxmox_add_firewall_rule
+      - name: proxmox_list_firewall_rules
+      - name: proxmox_get_vm_config
+      - name: proxmox_get_task_status
+    secrets:
+      - name: proxmox-url
+        env: PROXMOX_URL
+        example: https://192.168.1.10:8006
+      - name: proxmox-user
+        env: PROXMOX_USER
+        example: root@pam
+      - name: proxmox-password
+        env: PROXMOX_PASSWORD
+        example: secret
+    metadata:
+      category: automation
+      tags:
+        - infrastructure
+        - virtualization
+      license: MIT
+      owner: local

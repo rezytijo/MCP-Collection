@@ -1,0 +1,43 @@
+# Gitignore for MCP-Collection
+
+# General ignores
+.DS_Store
+.env
+.vscode/
+
+# Python ignores
+__pycache__/
+*.pyc
+*.log
+venv/
+.venv/
+
+# Docker ignores (beyond .dockerignore files in subdirectories)
+# For the main repository, avoid ignoring common docker files as they are part of the project
+# *.sock
+
+# Specific files the user wants to ignore
+Context.md
+GEMINI.md
+
+# PowerShell scripts - as per user's request for GitHub Actions to not use PS1 for build/push
+**/*.ps1
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE-specific files (e.g., VS Code)
+.vscode/
+
+# OS generated files
+.DS_Store
+.Trashes
+Thumbs.db
+
+# Project specific ignores (if any, will be added later)
+# e.g., output directories from specific tools
