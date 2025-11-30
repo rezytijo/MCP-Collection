@@ -136,25 +136,123 @@ This method provides the best security and resource efficiency by running the co
     -   Ensure your SSH server is running.
 
 2.  **Client-Side Configuration**:
-    -   Configure your MCP client (e.g., in your IDE or other tool) to launch the server via SSH:
-        ```json
-        {
-          "mcpServers": {
-            "remote-proxmox-ssh": {
-              "command": "ssh",
-              "args": [
-                "-i", "/path/to/your/private_ssh_key",
-                "user@your-remote-server-ip",
-                "docker", "run", "-i", "--rm", 
-                "-e", "PROXMOX_URL=https://your-proxmox-ip:8006",
-                "-e", "PROXMOX_USER=root@pam",
-                "-e", "PROXMOX_PASSWORD=yourpassword",
-                "proxmox-mcp-server:latest"
-              ]
-            }
+    For secure remote access via SSH tunnel, configure your MCP client with the following:
+
+    ```json
+    {
+      "mcpServers": {
+        "remote-proxmox-ssh": {
+          "command": "ssh",
+          "args": [
+            "-i", "/path/to/your/private_ssh_key",
+            "user@your-remote-server-ip",
+            "docker", "run", "-i", "--rm", 
+            "-e", "PROXMOX_URL=https://your-proxmox-ip:8006",
+            "-e", "PROXMOX_USER=root@pam",
+            "-e", "PROXMOX_PASSWORD=yourpassword",
+            "proxmox-mcp-server:latest"
+          ]
+        }
+      }
+    }
+    ```
+
+### Option 4: Direct Install on Client using Repo
+
+For direct installation and execution on your local client machine using the repository.
+
+1.  **Clone the Repository**:
+    ```bash
+    git clone https://github.com/rezytijo/MCP-Collection.git
+    cd MCP-Collection/Proxmox
+    ```
+
+2.  **Install Dependencies**:
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+3.  **Client-Side Configuration**:
+    Configure your MCP client to run the Python script directly. Below are examples for popular MCP-compatible tools.
+
+    #### For Claude Desktop (Local Python Execution)
+    Add the following to your `claude_desktop_config.json`:
+    ```json
+    {
+      "mcpServers": {
+        "Proxmox Test": {
+          "command": "python",
+          "args": [
+            "path/to/proxmox_server.py"
+          ],
+          "env": {
+            "PROXMOX_URL": "https://your-proxmox-ip:8006",
+            "PROXMOX_USER": "root@pam",
+            "PROXMOX_PASSWORD": "yourpassword",
+            "MCP_AUTH_TOKEN": "secret-token",
+            "PROXMOX_VERIFY_SSL": "false"
           }
         }
-        ```
+      }
+    }
+    ```
+
+    #### For Gemini (Google AI Studio or similar)
+    In your Gemini MCP configuration, add a server entry with the Python command:
+    ```json
+    {
+      "mcpServers": {
+        "proxmox-gemini": {
+          "command": "python",
+          "args": ["path/to/proxmox_server.py"],
+          "env": {
+            "PROXMOX_URL": "https://your-proxmox-ip:8006",
+            "PROXMOX_USER": "root@pam",
+            "PROXMOX_PASSWORD": "yourpassword",
+            "PROXMOX_VERIFY_SSL": "false"
+          }
+        }
+      }
+    }
+    ```
+
+    #### For GitHub Copilot
+    Configure in your Copilot MCP settings:
+    ```json
+    {
+      "mcpServers": {
+        "proxmox-copilot": {
+          "command": "python",
+          "args": ["path/to/proxmox_server.py"],
+          "env": {
+            "PROXMOX_URL": "https://your-proxmox-ip:8006",
+            "PROXMOX_USER": "root@pam",
+            "PROXMOX_PASSWORD": "yourpassword",
+            "PROXMOX_VERIFY_SSL": "false"
+          }
+        }
+      }
+    }
+    ```
+
+    #### For LM Studio
+    In LM Studio's MCP server configuration:
+    ```json
+    {
+      "mcpServers": {
+        "proxmox-lmstudio": {
+          "command": "python",
+          "args": ["path/to/proxmox_server.py"],
+          "env": {
+            "PROXMOX_URL": "https://your-proxmox-ip:8006",
+            "PROXMOX_USER": "root@pam",
+            "PROXMOX_PASSWORD": "yourpassword",
+            "PROXMOX_VERIFY_SSL": "false"
+          }
+        }
+      }
+    }
+    ```
 
 ## License
 
