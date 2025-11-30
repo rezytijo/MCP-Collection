@@ -58,6 +58,26 @@ The `Caddyfile` for the Proxmox MCP server (located in `Proxmox/Caddyfile`) can 
 
 _This section will be populated with the actual `docker-compose.yaml` content in the next step._
 
+### MCP Client Configuration
+
+To connect to the deployed MCP servers, you will need to configure your MCP client. Assuming you are using `localhost` with the provided `docker-compose.yaml` and `Caddyfile`:
+
+1.  **For Proxmox MCP Server**:
+    *   **Server Name**: `proxmox-mcp` (or whatever you name it in your client)
+    *   **URL**: `http://localhost/proxmox`
+    *   **Transport**: `sse` (Server-Sent Events) - _This is specified in the `proxmox_server.py` and `docker-compose.yaml`._
+    *   **Port**: `80` (or `443` if using HTTPS with Caddy) - _This is the Caddy exposed port._
+    *   **Tool List**: Ensure your client is configured to load tools from this server.
+
+2.  **For Kali-Linux MCP Server**:
+    *   **Server Name**: `kali-mcp` (or whatever you name it in your client)
+    *   **URL**: `http://localhost/kali`
+    *   **Transport**: `sse`
+    *   **Port**: `80` (or `443` if using HTTPS with Caddy)
+    *   **Tool List**: Ensure your client is configured to load tools from this server.
+
+**Note**: If you are using Caddy with Bearer Token authentication (as configured in the `Proxmox/Caddyfile` example), your client will need to include the `Authorization: Bearer <YOUR_TOKEN>` header with its requests. Consult your specific MCP client's documentation for how to configure custom headers or authentication.
+
 ### Usage
 
 Once the services are running via Docker Compose, you can interact with them. For example, if using Caddy as a reverse proxy, you might access:
