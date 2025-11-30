@@ -40,6 +40,9 @@ registry:
       - name: proxmox_write_file_vm
       - name: proxmox_add_firewall_rule
       - name: proxmox_list_firewall_rules
+      - name: proxmox_enable_firewall
+      - name: proxmox_disable_firewall
+      - name: proxmox_test_connection
       - name: proxmox_get_vm_config
       - name: proxmox_get_task_status
     secrets:

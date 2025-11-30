@@ -15,8 +15,9 @@ import io
 import paramiko
 import asyncio
 import shlex
+import signal
 from proxmoxer import ProxmoxAPI
-from proxmoxer.core import ProxmoxResourceError
+from proxmoxer.core import ResourceException
 from mcp.server.fastmcp import FastMCP
 
 # === LOGGING CONFIGURATION ===
@@ -687,7 +688,7 @@ async def proxmox_install_software(
         pid = res.get('pid')
         
         if not pid:
-            raise ProxmoxResourceError("Failed to start execution (No PID returned).")
+            raise ResourceException("Failed to start execution (No PID returned).")
 
         for _ in range(60): # 2-minute timeout
             status = proxmox.nodes(node).qemu(vmid).agent('exec-status').get(pid=pid)
@@ -703,7 +704,7 @@ async def proxmox_install_software(
         
         return f"⏳ Agent command for '{software}' started (PID {pid}), but timed out. Check VM manually."
 
-    except ProxmoxResourceError as e:
+    except ResourceException as e:
         logger.warning(f"QEMU Guest Agent failed for VM {vmid}: {e}. Attempting SSH fallback.")
 
         if not all([ip_address, ssh_user]) or not (ssh_password or ssh_private_key):
@@ -759,7 +760,7 @@ async def proxmox_execute_command(
         pid = res.get('pid')
         
         if not pid:
-            raise ProxmoxResourceError("Failed to start execution (No PID returned).")
+            raise ResourceException("Failed to start execution (No PID returned).")
 
         for _ in range(30): # 1-minute timeout (agent)
             status = proxmox.nodes(node).qemu(vmid).agent('exec-status').get(pid=pid)
@@ -775,7 +776,7 @@ async def proxmox_execute_command(
 
         return f"⏳ Agent command started (PID {pid}), but timed out."
 
-    except ProxmoxResourceError as e:
+    except ResourceException as e:
         logger.warning(f"QEMU Guest Agent failed for VM {vmid}: {e}. Attempting SSH fallback.")
         
         if not all([ip_address, ssh_user]) or not (ssh_password or ssh_private_key):
@@ -819,7 +820,7 @@ async def proxmox_read_file_vm(
         content_str = content_bytes.decode('utf-8', errors='replace')
         return f"📄 **File: {file_path} (via Agent)**\n```\n{content_str}\n```"
 
-    except ProxmoxResourceError as e:
+    except ResourceException as e:
         logger.warning(f"QEMU Guest Agent failed for VM {vmid}: {e}. Attempting SSH fallback.")
         
         if not all([ip_address, ssh_user]) or not (ssh_password or ssh_private_key):
@@ -869,7 +870,7 @@ async def proxmox_write_file_vm(
         )
         return f"✅ File '{file_path}' written successfully via Guest Agent."
 
-    except ProxmoxResourceError as e:
+    except ResourceException as e:
         logger.warning(f"QEMU Guest Agent failed for VM {vmid}: {e}. Attempting SSH fallback.")
         
         if not all([ip_address, ssh_user]) or not (ssh_password or ssh_private_key):
@@ -1076,6 +1077,50 @@ async def proxmox_list_firewall_rules(node: str = "", vmid: str = "") -> str:
 
 @mcp.tool()
 @log_activity
+async def proxmox_enable_firewall(node: str = "", vmid: str = "") -> str:
+    """Enable firewall for a VM."""
+    if not node.strip() or not vmid.strip():
+        return "❌ Error: Node and VMID are required."
+
+    try:
+        proxmox = get_proxmox_client()
+        vm_res = proxmox.nodes(node).qemu(vmid)
+        vm_res.config.post(firewall=1)
+        return f"🛡️ Firewall enabled for VM {vmid}."
+    except Exception as e:
+        return f"❌ Error enabling firewall: {str(e)}"
+
+@mcp.tool()
+@log_activity
+async def proxmox_disable_firewall(node: str = "", vmid: str = "") -> str:
+    """Disable firewall for a VM."""
+    if not node.strip() or not vmid.strip():
+        return "❌ Error: Node and VMID are required."
+
+    try:
+        proxmox = get_proxmox_client()
+        vm_res = proxmox.nodes(node).qemu(vmid)
+        vm_res.config.post(firewall=0)
+        return f"🚫 Firewall disabled for VM {vmid}."
+    except Exception as e:
+        return f"❌ Error disabling firewall: {str(e)}"
+
+@mcp.tool()
+@log_activity
+async def proxmox_test_connection() -> str:
+    """Test connection to the Proxmox server."""
+    try:
+        proxmox = get_proxmox_client()
+        # Test connection by getting version info
+        version = proxmox.version.get()
+        version_str = version.get('version', 'Unknown')
+        release = version.get('release', 'Unknown')
+        return f"✅ Connection successful!\n📊 Proxmox Version: {version_str}\n📅 Release: {release}"
+    except Exception as e:
+        return f"❌ Connection failed: {str(e)}\n🔍 Check PROXMOX_URL, credentials, and network connectivity."
+
+@mcp.tool()
+@log_activity
 async def proxmox_get_vm_config(node: str = "", vmid: str = "") -> str:
     """Get the full configuration of a specific VM or Container."""
     if not node.strip() or not vmid.strip():
@@ -1133,6 +1178,19 @@ async def proxmox_get_task_status(node: str = "", upid: str = "") -> str:
 
 
 if __name__ == "__main__":
+    def signal_handler(signum, frame):
+        logger.info(f"Server shutdown requested by signal {signum}", extra={"structured": {"event": "shutdown", "reason": f"signal_{signum}"}})
+        print(f"\n🛑 Server stopped by signal {signum}.")
+        sys.exit(0)
+
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    try:
+        signal.signal(signal.SIGTERM, signal_handler)
+    except ValueError:
+        # SIGTERM not available on Windows
+        pass
+
     logger.info("Starting Proxmox MCP server...", extra={"structured": {"event": "startup"}})
     try:
         if MCP_TRANSPORT == "sse":
@@ -1141,6 +1199,9 @@ if __name__ == "__main__":
         else:
             logger.info("Starting MCP server with STDIO transport")
             mcp.run(transport='stdio')
+    except KeyboardInterrupt:
+        logger.info("Server shutdown requested by user (Ctrl+C)", extra={"structured": {"event": "shutdown", "reason": "keyboard_interrupt"}})
+        print("\n🛑 Server stopped by user.")
     except Exception as e:
         logger.fatal(f"Server failed to start: {e}", exc_info=True)
         sys.exit(1)

@@ -1,0 +1,30 @@
+version: 2
+name: custom
+displayName: Custom MCP Servers
+registry:
+  document:
+    description: "Generate Word, Excel, and PowerPoint documents with templates"
+    title: "Document Generator"
+    type: server
+    dateAdded: "2025-11-30T00:00:00Z"
+    image: document-mcp-server:latest
+    ref: ""
+    readme: ""
+    toolsUrl: ""
+    source: ""
+    upstream: ""
+    icon: ""
+    tools:
+      - name: document_generate_word
+      - name: document_generate_excel
+      - name: document_generate_powerpoint
+      - name: document_generate_pdf
+    secrets:
+    metadata:
+      category: productivity
+      tags:
+        - document
+        - generation
+        - office
+      license: MIT
+      owner: local
