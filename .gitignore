@@ -23,6 +23,7 @@ GEMINI.md
 
 # PowerShell scripts - as per user's request for GitHub Actions to not use PS1 for build/push
 **/*.ps1
+**/*.cmd
 
 # Build artifacts
 dist/
@@ -42,3 +43,8 @@ Thumbs.db
 
 # Project specific ignores (if any, will be added later)
 # e.g., output directories from specific tools
+
+# Yaml files - as per user's request
+**/*.yaml
+!proxmox-mcp.yaml
+!registry.yaml

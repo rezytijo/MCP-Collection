@@ -1,7 +1,7 @@
 name: Build and Push Proxmox MCP Server
 
 on:
-  push:
+  workflow_dispatch:
     branches:
       - main
     paths:

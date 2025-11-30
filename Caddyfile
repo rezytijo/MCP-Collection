@@ -1,4 +1,0 @@
-:80 {
-    reverse_proxy /proxmox* proxmox-mcp:8000
-    reverse_proxy /kali* kali-mcp:8000
-}
