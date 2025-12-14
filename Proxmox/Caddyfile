@@ -1,0 +1,22 @@
+# Caddyfile for Proxmox MCP Server
+# This sets up HTTPS with automatic certificates (if domain is used) or self-signed for IP
+
+:8443 {
+    # Reverse proxy to the MCP server
+    reverse_proxy proxmox-mcp:8000
+
+    # Enable TLS (use 'tls internal' for self-signed certs with IP addresses)
+    tls internal
+
+    # Optional: Basic auth using MCP_AUTH_TOKEN as password
+    # Uncomment if needed for additional security
+    # basicauth / {
+    #     mcp {env.MCP_AUTH_TOKEN}
+    # }
+
+    # Log requests
+    log {
+        output stdout
+        format json
+    }
+}

@@ -86,13 +86,18 @@ def log_activity(func):
 
 # === INITIALIZATION ===
 
-mcp = FastMCP("proxmox")
 PROXMOX_URL = os.environ.get("PROXMOX_URL", "")
 PROXMOX_USER = os.environ.get("PROXMOX_USER", "")
 PROXMOX_PASSWORD = os.environ.get("PROXMOX_PASSWORD", "")
+if not PROXMOX_PASSWORD:
+    secret_path = "/run/secrets/PROXMOX_PASSWORD"
+    if os.path.exists(secret_path):
+        with open(secret_path, 'r') as f:
+            PROXMOX_PASSWORD = f.read().strip()
 PROXMOX_VERIFY_SSL = os.environ.get("PROXMOX_VERIFY_SSL", "false").lower() == "true"
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio").lower()
 MCP_PORT = int(os.environ.get("MCP_PORT", "8000"))
+mcp = FastMCP("proxmox", port=MCP_PORT, host='0.0.0.0')
 
 # === UTILITY FUNCTIONS ===
 
@@ -238,7 +243,7 @@ async def proxmox_list_nodes() -> str:
         
         output = ["📊 Proxmox Nodes:"]
         for node in nodes:
-            status_emoji = "🟢" if node.get('status') == 'online' else "🔴"
+            status_emoji = "ONLINE" if node.get('status') == 'online' else "OFFLINE"
             output.append(f"- {status_emoji} {node.get('node')} (CPU: {node.get('cpu', 0):.1%}, RAM: {int(node.get('mem', 0)/1024/1024)}MB)")
             
         return "\n".join(output)
@@ -281,43 +286,33 @@ async def proxmox_list_vms(node: str = "") -> str:
 
 @mcp.tool()
 @log_activity
-async def proxmox_start_vm(node: str = "", vmid: str = "") -> str:
-    """Start a specific VM or Container by ID on a Node."""
-    if not node.strip() or not vmid.strip():
-        return "❌ Error: Node and VMID are required"
+async def proxmox_control_vm(node: str = "", vmid: str = "", action: str = "") -> str:
+    """Start or stop a specific VM or Container by ID on a Node."""
+    if not node.strip() or not vmid.strip() or action not in ["start", "stop"]:
+        return "❌ Error: Node, VMID, and action ('start' or 'stop') are required"
     
     try:
         proxmox = get_proxmox_client()
-        try:
-            proxmox.nodes(node).qemu(vmid).status.start.post()
-            return f"⚡ Signal sent to start VM {vmid} on {node}"
-        except:
+        if action == "start":
             try:
-                proxmox.nodes(node).lxc(vmid).status.start.post()
-                return f"⚡ Signal sent to start LXC {vmid} on {node}"
-            except Exception as inner_e:
-                 return f"❌ Error starting {vmid}: {str(inner_e)}"
-    except Exception as e:
-        return f"❌ Error: {str(e)}"
-
-@mcp.tool()
-@log_activity
-async def proxmox_stop_vm(node: str = "", vmid: str = "") -> str:
-    """Stop (shutdown) a specific VM or Container by ID on a Node."""
-    if not node.strip() or not vmid.strip():
-        return "❌ Error: Node and VMID are required"
-
-    try:
-        proxmox = get_proxmox_client()
-        try:
-            proxmox.nodes(node).qemu(vmid).status.shutdown.post()
-            return f"⚡ Signal sent to shutdown VM {vmid} on {node}"
-        except:
+                proxmox.nodes(node).qemu(vmid).status.start.post()
+                return f"⚡ Signal sent to start VM {vmid} on {node}"
+            except:
+                try:
+                    proxmox.nodes(node).lxc(vmid).status.start.post()
+                    return f"⚡ Signal sent to start LXC {vmid} on {node}"
+                except Exception as inner_e:
+                     return f"❌ Error starting {vmid}: {str(inner_e)}"
+        elif action == "stop":
             try:
-                proxmox.nodes(node).lxc(vmid).status.shutdown.post()
-                return f"⚡ Signal sent to shutdown LXC {vmid} on {node}"
-            except Exception as inner_e:
-                return f"❌ Error stopping {vmid}: {str(inner_e)}"
+                proxmox.nodes(node).qemu(vmid).status.shutdown.post()
+                return f"⚡ Signal sent to shutdown VM {vmid} on {node}"
+            except:
+                try:
+                    proxmox.nodes(node).lxc(vmid).status.shutdown.post()
+                    return f"⚡ Signal sent to shutdown LXC {vmid} on {node}"
+                except Exception as inner_e:
+                    return f"❌ Error stopping {vmid}: {str(inner_e)}"
     except Exception as e:
         return f"❌ Error: {str(e)}"
 
@@ -477,76 +472,49 @@ async def proxmox_update_vm(node: str = "", vmid: str = "", cores: int = 0, memo
 
 @mcp.tool()
 @log_activity
-async def proxmox_create_snapshot(node: str = "", vmid: str = "", name: str = "", description: str = "") -> str:
-    """Create a snapshot of a VM."""
-    if not node.strip() or not vmid.strip() or not name.strip():
-        return "❌ Error: Node, VMID, and snapshot name are required."
+async def proxmox_manage_snapshot(node: str = "", vmid: str = "", action: str = "", name: str = "", description: str = "") -> str:
+    """Manage snapshots for a VM: create, list, rollback, or delete."""
+    if not node.strip() or not vmid.strip() or action not in ["create", "list", "rollback", "delete"]:
+        return "❌ Error: Node, VMID, and action ('create', 'list', 'rollback', or 'delete') are required."
 
     try:
         proxmox = get_proxmox_client()
         vm_res = proxmox.nodes(node).qemu(vmid)
-        vm_res.snapshot.post(snapname=name, description=description)
-        return f"📸 Snapshot '{name}' created for VM {vmid}."
-    except Exception as e:
-        return f"❌ Error creating snapshot: {str(e)}"
-
-@mcp.tool()
-@log_activity
-async def proxmox_list_snapshots(node: str = "", vmid: str = "") -> str:
-    """List all snapshots for a specific VM."""
-    if not node.strip() or not vmid.strip():
-        return "❌ Error: Node and VMID are required."
-
-    try:
-        proxmox = get_proxmox_client()
-        vm_res = proxmox.nodes(node).qemu(vmid)
-        snapshots = vm_res.snapshot.get()
         
-        if not snapshots:
-            return f"No snapshots found for VM {vmid}."
-            
-        output = [f"📸 Snapshots for VM {vmid}:"]
-        for snap in snapshots:
-            name = snap.get('name')
-            if not name and snap.get('description') == "You are here!":
-                 name = "(Current State)"
-            ts = snap.get('snaptime', snap.get('time', 'Unknown'))
-            desc = snap.get('description', 'No description')
-            output.append(f"- {name}: {desc} (Time: {ts})")
-            
-        return "\n".join(output)
+        if action == "create":
+            if not name.strip():
+                return "❌ Error: Snapshot name is required for create action."
+            vm_res.snapshot.post(snapname=name, description=description)
+            return f"📸 Snapshot '{name}' created for VM {vmid}."
+        
+        elif action == "list":
+            snapshots = vm_res.snapshot.get()
+            if not snapshots:
+                return f"No snapshots found for VM {vmid}."
+            output = [f"📸 Snapshots for VM {vmid}:"]
+            for snap in snapshots:
+                snap_name = snap.get('name')
+                if not snap_name and snap.get('description') == "You are here!":
+                     snap_name = "(Current State)"
+                ts = snap.get('snaptime', snap.get('time', 'Unknown'))
+                desc = snap.get('description', 'No description')
+                output.append(f"- {snap_name}: {desc} (Time: {ts})")
+            return "\n".join(output)
+        
+        elif action == "rollback":
+            if not name.strip():
+                return "❌ Error: Snapshot name is required for rollback action."
+            vm_res.snapshot(name).rollback.post()
+            return f"↩️ VM {vmid} rollback to snapshot '{name}' initiated."
+        
+        elif action == "delete":
+            if not name.strip():
+                return "❌ Error: Snapshot name is required for delete action."
+            vm_res.snapshot(name).delete()
+            return f"🗑️ Snapshot '{name}' deleted for VM {vmid}."
+    
     except Exception as e:
-        return f"❌ Error listing snapshots: {str(e)}"
-
-@mcp.tool()
-@log_activity
-async def proxmox_rollback_snapshot(node: str = "", vmid: str = "", snapshot_name: str = "") -> str:
-    """Rollback a VM to a specific snapshot."""
-    if not node.strip() or not vmid.strip() or not snapshot_name.strip():
-        return "❌ Error: Node, VMID, and snapshot name are required."
-
-    try:
-        proxmox = get_proxmox_client()
-        vm_res = proxmox.nodes(node).qemu(vmid)
-        vm_res.snapshot(snapshot_name).rollback.post()
-        return f"↩️ VM {vmid} rollback to snapshot '{snapshot_name}' initiated."
-    except Exception as e:
-        return f"❌ Error rolling back snapshot: {str(e)}"
-
-@mcp.tool()
-@log_activity
-async def proxmox_delete_snapshot(node: str = "", vmid: str = "", snapshot_name: str = "") -> str:
-    """Delete a specific snapshot from a VM."""
-    if not node.strip() or not vmid.strip() or not snapshot_name.strip():
-        return "❌ Error: Node, VMID, and snapshot name are required."
-
-    try:
-        proxmox = get_proxmox_client()
-        vm_res = proxmox.nodes(node).qemu(vmid)
-        vm_res.snapshot(snapshot_name).delete()
-        return f"🗑️ Snapshot '{snapshot_name}' deleted for VM {vmid}."
-    except Exception as e:
-        return f"❌ Error deleting snapshot: {str(e)}"
+        return f"❌ Error managing snapshot ({action}): {str(e)}"
 
 @mcp.tool()
 @log_activity
@@ -893,64 +861,48 @@ async def proxmox_write_file_vm(
 
 @mcp.tool()
 @log_activity
-async def proxmox_create_backup(node: str = "", vmid: str = "", storage: str = "local", mode: str = "snapshot", compression: str = "zstd") -> str:
-    """Trigger a backup (vzdump) for a specific VM or Container."""
-    if not node.strip() or not vmid.strip():
-        return "❌ Error: Node and VMID are required."
-
-    try:
-        proxmox = get_proxmox_client()
-        res = proxmox.nodes(node).vzdump.post(
-            vmid=vmid,
-            storage=storage,
-            mode=mode,
-            compress=compression
-        )
-        upid = res
-        return f"✅ Backup started for VM {vmid} (Task: {upid}). check Proxmox UI for progress."
-    except Exception as e:
-        return f"❌ Error starting backup: {str(e)}"
-
-@mcp.tool()
-@log_activity
-async def proxmox_list_backups(node: str = "", storage: str = "") -> str:
-    """List backup files on a specific node/storage."""
-    if not node.strip() or not storage.strip():
-        return "❌ Error: Node and Storage are required."
-
-    try:
-        proxmox = get_proxmox_client()
-        contents = proxmox.nodes(node).storage(storage).content.get(content="backup")
-        
-        output = [f"📦 **Backups on {storage}**:"]
-        for item in contents:
-            volid = item.get('volid')
-            size = int(item.get('size', 0) / 1024 / 1024) # MB
-            vmid = item.get('vmid', 'unknown')
-            output.append(f"- VM {vmid}: `{volid}` ({size}MB)")
-            
-        return "\n".join(output)
-    except Exception as e:
-        return f"❌ Error listing backups: {str(e)}"
-
-@mcp.tool()
-@log_activity
-async def proxmox_restore_backup(node: str = "", vmid: str = "", backup_file: str = "", storage: str = "local-lvm") -> str:
-    """Restore a VM from a backup file."""
-    if not node.strip() or not backup_file.strip():
-        return "❌ Error: Node and Backup File (volid) are required."
+async def proxmox_manage_backup(node: str = "", vmid: str = "", action: str = "", storage: str = "", backup_file: str = "", mode: str = "snapshot", compression: str = "zstd") -> str:
+    """Manage backups for VMs: create, list, or restore."""
+    if not node.strip() or action not in ["create", "list", "restore"]:
+        return "❌ Error: Node and action ('create', 'list', or 'restore') are required."
 
     try:
         proxmox = get_proxmox_client()
         
-        if not vmid:
-            vmid = get_next_vmid(proxmox)
+        if action == "create":
+            if not vmid.strip():
+                return "❌ Error: VMID is required for create action."
+            res = proxmox.nodes(node).vzdump.post(
+                vmid=vmid,
+                storage=storage or "local",
+                mode=mode,
+                compress=compression
+            )
+            upid = res
+            return f"✅ Backup started for VM {vmid} (Task: {upid}). Check Proxmox UI for progress."
         
-        proxmox.nodes(node).qmrestore.post(vmid=vmid, archive=backup_file, storage=storage)
+        elif action == "list":
+            if not storage.strip():
+                return "❌ Error: Storage is required for list action."
+            contents = proxmox.nodes(node).storage(storage).content.get(content="backup")
+            output = [f"📦 **Backups on {storage}**:"]
+            for item in contents:
+                volid = item.get('volid')
+                size = int(item.get('size', 0) / 1024 / 1024) # MB
+                vm_id = item.get('vmid', 'unknown')
+                output.append(f"- VM {vm_id}: `{volid}` ({size}MB)")
+            return "\n".join(output)
         
-        return f"✅ Restore started for VM {vmid} from {backup_file}."
+        elif action == "restore":
+            if not backup_file.strip():
+                return "❌ Error: Backup file (volid) is required for restore action."
+            if not vmid.strip():
+                vmid = get_next_vmid(proxmox)
+            proxmox.nodes(node).qmrestore.post(vmid=vmid, archive=backup_file, storage=storage or "local-lvm")
+            return f"✅ Restore started for VM {vmid} from {backup_file}."
+    
     except Exception as e:
-        return f"❌ Error restoring backup: {str(e)}"
+        return f"❌ Error managing backup ({action}): {str(e)}"
 
 @mcp.tool()
 @log_activity
@@ -1077,33 +1029,21 @@ async def proxmox_list_firewall_rules(node: str = "", vmid: str = "") -> str:
 
 @mcp.tool()
 @log_activity
-async def proxmox_enable_firewall(node: str = "", vmid: str = "") -> str:
-    """Enable firewall for a VM."""
+async def proxmox_set_firewall(node: str = "", vmid: str = "", enable: bool = True) -> str:
+    """Enable or disable firewall for a VM."""
     if not node.strip() or not vmid.strip():
         return "❌ Error: Node and VMID are required."
 
     try:
         proxmox = get_proxmox_client()
         vm_res = proxmox.nodes(node).qemu(vmid)
-        vm_res.config.post(firewall=1)
-        return f"🛡️ Firewall enabled for VM {vmid}."
+        vm_res.config.post(firewall=int(enable))
+        if enable:
+            return f"🛡️ Firewall enabled for VM {vmid}."
+        else:
+            return f"🚫 Firewall disabled for VM {vmid}."
     except Exception as e:
-        return f"❌ Error enabling firewall: {str(e)}"
-
-@mcp.tool()
-@log_activity
-async def proxmox_disable_firewall(node: str = "", vmid: str = "") -> str:
-    """Disable firewall for a VM."""
-    if not node.strip() or not vmid.strip():
-        return "❌ Error: Node and VMID are required."
-
-    try:
-        proxmox = get_proxmox_client()
-        vm_res = proxmox.nodes(node).qemu(vmid)
-        vm_res.config.post(firewall=0)
-        return f"🚫 Firewall disabled for VM {vmid}."
-    except Exception as e:
-        return f"❌ Error disabling firewall: {str(e)}"
+        return f"❌ Error {'enabling' if enable else 'disabling'} firewall: {str(e)}"
 
 @mcp.tool()
 @log_activity
@@ -1176,8 +1116,48 @@ async def proxmox_get_task_status(node: str = "", upid: str = "") -> str:
     except Exception as e:
         return f"❌ Error getting task status: {str(e)}"
 
+@mcp.tool()
+def proxmox_get_server_specs(node: str = "") -> str:
+    """Get detailed hardware specifications of a Proxmox server node."""
+    if not node.strip():
+        return "Error: Node name is required."
 
-if __name__ == "__main__":
+    try:
+        # Simple test first
+        proxmox = get_proxmox_client()
+        version = proxmox.version.get()
+        ver = version.get('version', 'Unknown')
+
+        # Get basic node info
+        node_status = proxmox.nodes(node).status.get()
+        cpu_info = node_status.get('cpuinfo', {})
+        cpu_model = cpu_info.get('model', 'Unknown')
+        cpu_cores = cpu_info.get('cores', 0)
+
+        memory_info = node_status.get('memory', {})
+        memory_total = int(memory_info.get('total', 0) / 1024 / 1024 / 1024)
+        memory_used = int(memory_info.get('used', 0) / 1024 / 1024 / 1024)
+
+        # Simple output - avoid any complex formatting
+        result = "SERVER SPECIFICATIONS - Node: " + node + "\n"
+        result += "=" * 50 + "\n"
+        result += "Proxmox Version: " + ver + "\n\n"
+        result += "CPU Information:\n"
+        result += "- Model: " + cpu_model + "\n"
+        result += "- Cores: " + str(cpu_cores) + "\n\n"
+        result += "Memory (RAM):\n"
+        result += "- Total: " + str(memory_total) + " GB\n"
+        result += "- Used: " + str(memory_used) + " GB\n\n"
+        result += "=" * 50
+
+        return result
+
+    except Exception as e:
+        return "Error getting server specifications: " + str(e)
+
+
+def main():
+    """Main entry point for the Proxmox MCP server."""
     def signal_handler(signum, frame):
         logger.info(f"Server shutdown requested by signal {signum}", extra={"structured": {"event": "shutdown", "reason": f"signal_{signum}"}})
         print(f"\n🛑 Server stopped by signal {signum}.")
@@ -1195,7 +1175,7 @@ if __name__ == "__main__":
     try:
         if MCP_TRANSPORT == "sse":
             logger.info(f"Starting MCP server with SSE transport on port {MCP_PORT}")
-            mcp.run(transport='sse', port=MCP_PORT)
+            mcp.run(transport='sse')
         else:
             logger.info("Starting MCP server with STDIO transport")
             mcp.run(transport='stdio')
@@ -1205,3 +1185,7 @@ if __name__ == "__main__":
     except Exception as e:
         logger.fatal(f"Server failed to start: {e}", exc_info=True)
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

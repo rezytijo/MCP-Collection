@@ -1,0 +1,16 @@
+{
+    "mcpServers": {
+        "proxmox-python": {
+            "command": "python",
+            "args": [
+                "path/to/proxmox_server.py"
+            ],
+            "env": {
+                "PROXMOX_URL": "https://your-proxmox-ip:8006",
+                "PROXMOX_USER": "root@pam",
+                "PROXMOX_PASSWORD": "yourpassword",
+                "PROXMOX_VERIFY_SSL": "false"
+            }
+        }
+    }
+}

@@ -1,0 +1,20 @@
+{
+    "mcp": {
+        "servers": {
+            "proxmox-uvx": {
+                "command": "uvx",
+                "args": [
+                    "--from",
+                    "C:\\Users\\primall\\OneDrive - Kementerian Komunikasi dan Informatika\\Documents\\Kantor\\Program\\MCP\\Proxmox",
+                    "proxmox-mcp"
+                ],
+                "env": {
+                    "PROXMOX_URL": "https://your-proxmox-ip:8006",
+                    "PROXMOX_USER": "root@pam",
+                    "PROXMOX_PASSWORD": "yourpassword",
+                    "PROXMOX_VERIFY_SSL": "false"
+                }
+            }
+        }
+    }
+}

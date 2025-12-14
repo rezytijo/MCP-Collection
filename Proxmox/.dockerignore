@@ -37,3 +37,6 @@ proxmox-mcp.yaml
 registry.yaml
 docker-compose.yaml
 Caddyfile
+
+# Configuration examples (not needed in Docker image)
+examples/

@@ -1,0 +1,21 @@
+{
+    "mcpServers": {
+        "proxmox-docker": {
+            "command": "docker",
+            "args": [
+                "run",
+                "-i",
+                "--rm",
+                "-e",
+                "PROXMOX_URL=https://your-proxmox-ip:8006",
+                "-e",
+                "PROXMOX_USER=root@pam",
+                "-e",
+                "PROXMOX_PASSWORD=yourpassword",
+                "-e",
+                "PROXMOX_VERIFY_SSL=false",
+                "proxmox-mcp-server"
+            ]
+        }
+    }
+}

@@ -33,5 +33,8 @@ RUN useradd -m -u 1000 mcpuser && \
 # Switch to non-root user
 USER mcpuser
 
+# Expose port for MCP SSE transport
+EXPOSE 8000
+
 # Run the server
 CMD ["python", "proxmox_server.py"]

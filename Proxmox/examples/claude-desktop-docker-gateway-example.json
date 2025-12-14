@@ -1,0 +1,14 @@
+{
+    "mcpServers": {
+        "proxmox": {
+            "dockerImage": "proxmox-mcp-server",
+            "env": {
+                "PROXMOX_URL": "https://your-proxmox-ip:8006",
+                "PROXMOX_USER": "root@pam",
+                "PROXMOX_PASSWORD": "yourpassword",
+                "PROXMOX_VERIFY_SSL": "false",
+                "MCP_TRANSPORT": "sse"
+            }
+        }
+    }
+}
