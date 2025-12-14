@@ -305,12 +305,12 @@ async def proxmox_control_vm(node: str = "", vmid: str = "", action: str = "") -
                      return f"❌ Error starting {vmid}: {str(inner_e)}"
         elif action == "stop":
             try:
-                proxmox.nodes(node).qemu(vmid).status.shutdown.post()
-                return f"⚡ Signal sent to shutdown VM {vmid} on {node}"
+                proxmox.nodes(node).qemu(vmid).status.stop.post()
+                return f"⚡ Signal sent to force stop VM {vmid} on {node}"
             except:
                 try:
-                    proxmox.nodes(node).lxc(vmid).status.shutdown.post()
-                    return f"⚡ Signal sent to shutdown LXC {vmid} on {node}"
+                    proxmox.nodes(node).lxc(vmid).status.stop.post()
+                    return f"⚡ Signal sent to force stop LXC {vmid} on {node}"
                 except Exception as inner_e:
                     return f"❌ Error stopping {vmid}: {str(inner_e)}"
     except Exception as e:

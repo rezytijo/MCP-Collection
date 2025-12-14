@@ -2,6 +2,7 @@
 
 A Model Context Protocol (MCP) server that integrates with your Proxmox Virtual Environment to manage virtual machines, containers, and infrastructure with enhanced flexibility through SSH fallbacks.
 
+
 ## Purpose
 
 This MCP server provides a secure and robust interface for AI assistants to audit nodes, manage VM lifecycles, and provision new infrastructure directly from the chat interface. It intelligently switches between the QEMU Guest Agent and SSH for maximum reliability.
