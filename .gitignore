@@ -20,6 +20,7 @@ venv/
 # Specific files the user wants to ignore
 Context.md
 GEMINI.md
+PROXMOX_PASSWORD.txt
 
 # PowerShell scripts - as per user's request for GitHub Actions to not use PS1 for build/push
 **/*.ps1
